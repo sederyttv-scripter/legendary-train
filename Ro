@@ -9,13 +9,13 @@ local RNG = Random.new()
 local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
-local Character, Humanoid, HumanoidRootPart
+local Character, Humanoid, HumanoidRootPart  
 
 local function updateCharacterRefs(char)
     Character = char
     Humanoid = Character:WaitForChild("Humanoid")
     HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-end
+end  
 
 if Player.Character then
     updateCharacterRefs(Player.Character)
@@ -102,12 +102,12 @@ end)
 local function getFacingTarget()
     if not HumanoidRootPart then return end
     local nearest
-    local dist = ReachDistance
+    local dist = ReachDistance 
 
     -- Players
     for _, p in pairs(Players:GetPlayers()) do
-        if p ~= Player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") 
-           and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+        if p ~= Player and p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+            and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
             local d = (p.Character.HumanoidRootPart.Position - HumanoidRootPart.Position).Magnitude
             if d < dist then
                 dist = d
@@ -118,8 +118,8 @@ local function getFacingTarget()
 
     -- NPCs
     for _, v in pairs(workspace:GetDescendants()) do
-        if v:IsA("Model") and v ~= Character and v:FindFirstChild("HumanoidRootPart") 
-           and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+        if v:IsA("Model") and v ~= Character and v:FindFirstChild("HumanoidRootPart")
+            and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
             local d = (v.HumanoidRootPart.Position - HumanoidRootPart.Position).Magnitude
             if d < dist then
                 dist = d
@@ -147,7 +147,11 @@ local function adjustToTarget(Target)
         end
 
         local Direction = PredictedPos - HumanoidRootPart.Position
-        local Speed = math.clamp(Direction.Magnitude*5, 50, 1000)
+        local Distance = Direction.Magnitude
+
+        -- Speed capped at 100
+        local Speed = math.clamp(Distance * 2, 0, 100)
+
         local OldVel = HumanoidRootPart.Velocity
 
         -- Pass through walls
