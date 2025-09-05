@@ -1,187 +1,361 @@
-repeat task.wait() until game:IsLoaded()
-
--- Variables
-local ForsakenReachEnabled = false
-local ReachDistance = 120
-local RNG = Random.new()
-
--- Player references
+-- Hitbox Extender (Clean GUI, Circle Visualizer)
+local lolz = {}
+local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
-local Player = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
-local Character, Humanoid, HumanoidRootPart  
+local UserInputService = game:GetService("UserInputService")
+local lp = Players.LocalPlayer
 
-local function updateCharacterRefs(char)
-    Character = char
-    Humanoid = Character:WaitForChild("Humanoid")
-    HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-end  
+-- Global stop flag
+getgenv().emergency_stop = getgenv().emergency_stop or false
 
-if Player.Character then
-    updateCharacterRefs(Player.Character)
-end
-Player.CharacterAdded:Connect(updateCharacterRefs)
+-- Settings
+local CurrentKeybind = Enum.KeyCode.Q
+local SliderStuds = 2
 
--- Animation IDs
-local AttackAnimations = {
-    'rbxassetid://131430497821198','rbxassetid://83829782357897','rbxassetid://126830014841198',
-    'rbxassetid://126355327951215','rbxassetid://121086746534252','rbxassetid://105458270463374',
-    'rbxassetid://127172483138092','rbxassetid://18885919947','rbxassetid://18885909645',
-    'rbxassetid://87259391926321','rbxassetid://106014898528300','rbxassetid://86545133269813',
-    'rbxassetid://89448354637442','rbxassetid://90499469533503','rbxassetid://116618003477002',
-    'rbxassetid://106086955212611','rbxassetid://107640065977686','rbxassetid://77124578197357',
-    'rbxassetid://101771617803133','rbxassetid://134958187822107','rbxassetid://111313169447787',
-    'rbxassetid://71685573690338','rbxassetid://129843313690921','rbxassetid://97623143664485',
-    'rbxassetid://136007065400978','rbxassetid://86096387000557','rbxassetid://108807732150251',
-    'rbxassetid://138040001965654','rbxassetid://73502073176819','rbxassetid://86709774283672',
-    'rbxassetid://140703210927645','rbxassetid://96173857867228','rbxassetid://121255898612475',
-    'rbxassetid://98031287364865','rbxassetid://119462383658044','rbxassetid://77448521277146',
-    'rbxassetid://103741352379819','rbxassetid://131696603025265','rbxassetid://122503338277352',
-    'rbxassetid://97648548303678','rbxassetid://94162446513587','rbxassetid://84426150435898',
-    'rbxassetid://93069721274110','rbxassetid://114620047310688','rbxassetid://97433060861952',
-    'rbxassetid://82183356141401','rbxassetid://100592913030351','rbxassetid://121293883585738',
-    'rbxassetid://70447634862911','rbxassetid://92173139187970','rbxassetid://106847695270773',
-    'rbxassetid://125403313786645','rbxassetid://81639435858902','rbxassetid://137314737492715',
-    'rbxassetid://120112897026015','rbxassetid://82113744478546','rbxassetid://118298475669935',
-    'rbxassetid://126681776859538','rbxassetid://129976080405072','rbxassetid://109667959938617',
-    'rbxassetid://74707328554358','rbxassetid://133336594357903','rbxassetid://86204001129974',
-    'rbxassetid://124243639579224','rbxassetid://70371667919898','rbxassetid://131543461321709',
-    'rbxassetid://136323728355613','rbxassetid://109230267448394','rbxassetid://139835501033932'
-}
-
--- UI
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ForsakenReachGUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = Player:WaitForChild("PlayerGui")
-
-local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 250, 0, 120)
-Frame.Position = UDim2.new(0, 20, 0, 20)
-Frame.BackgroundColor3 = Color3.fromRGB(30,30,30)
-Frame.BorderSizePixel = 0
-Frame.Parent = ScreenGui
-
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0,10)
-UICorner.Parent = Frame
-
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(0, 200, 0, 40)
-ToggleButton.Position = UDim2.new(0,25,0,10)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(50,50,50)
-ToggleButton.TextColor3 = Color3.fromRGB(255,255,255)
-ToggleButton.Text = "Enable Reach: OFF"
-ToggleButton.Parent = Frame
-
-ToggleButton.MouseButton1Click:Connect(function()
-    ForsakenReachEnabled = not ForsakenReachEnabled
-    ToggleButton.Text = "Enable Reach: "..(ForsakenReachEnabled and "ON" or "OFF")
-end)
-
-local ReachBox = Instance.new("TextBox")
-ReachBox.Size = UDim2.new(0,200,0,40)
-ReachBox.Position = UDim2.new(0,25,0,60)
-ReachBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
-ReachBox.TextColor3 = Color3.fromRGB(255,255,255)
-ReachBox.PlaceholderText = "Reach Distance (studs)"
-ReachBox.Text = tostring(ReachDistance)
-ReachBox.ClearTextOnFocus = false
-ReachBox.Parent = Frame
-
-ReachBox.FocusLost:Connect(function()
-    local num = tonumber(ReachBox.Text)
-    if num then
-        ReachDistance = math.max(10,num)
-        ReachBox.Text = tostring(ReachDistance)
-        print("Reach Distance set to:", ReachDistance)
-    end
-end)
-
--- Get nearest target (players + NPCs)
-local function getFacingTarget()
-    if not HumanoidRootPart then return end
-    local nearest
-    local dist = ReachDistance 
-
-    -- Players
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= Player and p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-            and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
-            local d = (p.Character.HumanoidRootPart.Position - HumanoidRootPart.Position).Magnitude
-            if d < dist then
-                dist = d
-                nearest = p.Character
-            end
-        end
-    end
-
-    -- NPCs
-    for _, v in pairs(workspace:GetDescendants()) do
-        if v:IsA("Model") and v ~= Character and v:FindFirstChild("HumanoidRootPart")
-            and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
-            local d = (v.HumanoidRootPart.Position - HumanoidRootPart.Position).Magnitude
-            if d < dist then
-                dist = d
-                nearest = v
-            end
-        end
-    end
-
-    return nearest
+-- Utility: studs -> power multiplier
+local function StudsIntoPower(studs)
+    return studs * 6
 end
 
--- Move toward target, predictive aim, face only during attack, AFK fix, pass through walls
-local function adjustToTarget(Target)
-    while ForsakenReachEnabled and Target and Target:FindFirstChild("HumanoidRootPart") do
-        local TargetPos = Target.HumanoidRootPart.Position
-        local TargetVel = Target.HumanoidRootPart.Velocity
-        local Dist = (TargetPos - HumanoidRootPart.Position).Magnitude
+-- GUI creation
+local gui = Instance.new("ScreenGui")
+local frame = Instance.new("Frame")
+local uicorner = Instance.new("UICorner")
+local title = Instance.new("TextLabel")
+local exitBtn = Instance.new("TextButton")
+local miniTab = Instance.new("TextButton")
+local studsBox = Instance.new("TextBox")
+local onBtn = Instance.new("TextButton")
+local offBtn = Instance.new("TextButton")
+local keyBox = Instance.new("TextBox")
+local sliderFrame = Instance.new("Frame")
+local sliderBar = Instance.new("Frame")
+local sliderHandle = Instance.new("Frame")
+local sliderLabel = Instance.new("TextLabel")
+local hint = Instance.new("TextLabel")
 
-        local PredictedPos
-        if Dist < 4 then
-            PredictedPos = TargetPos -- AFK/close target
+pcall(function() gui.Parent = game:GetService("CoreGui") end)
+
+-- Frame
+frame.Parent = gui
+frame.BackgroundColor3 = Color3.fromRGB(28,28,28)
+frame.Position = UDim2.new(0.05,0,0.35,0)
+frame.Size = UDim2.new(0,240,0,260)
+uicorner.CornerRadius = UDim.new(0,10)
+uicorner.Parent = frame
+
+-- Title
+title.Parent = frame
+title.Size = UDim2.new(1,0,0,28)
+title.BackgroundTransparency = 1
+title.Position = UDim2.new(0,0,0,0)
+title.Text = "Hitbox Extender"
+title.TextColor3 = Color3.new(1,1,1)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 18
+
+-- Exit button
+exitBtn.Parent = frame
+exitBtn.Size = UDim2.new(0,26,0,26)
+exitBtn.Position = UDim2.new(1,-30,0,2)
+exitBtn.Text = "X"
+exitBtn.Font = Enum.Font.SourceSansBold
+exitBtn.TextSize = 16
+exitBtn.BackgroundColor3 = Color3.fromRGB(180,50,50)
+exitBtn.TextColor3 = Color3.new(1,1,1)
+
+-- Minimized tab
+miniTab.Parent = gui
+miniTab.Size = UDim2.new(0,96,0,34)
+miniTab.Position = UDim2.new(1,-110,1,-46)
+miniTab.BackgroundColor3 = Color3.fromRGB(40,40,40)
+miniTab.Text = "Hitbox GUI"
+miniTab.TextColor3 = Color3.new(1,1,1)
+miniTab.Visible = false
+
+-- Studs textbox
+studsBox.Parent = frame
+studsBox.PlaceholderText = "Manual studs (optional)"
+studsBox.Size = UDim2.new(0,200,0,30)
+studsBox.Position = UDim2.new(0.05,0,0.18,0)
+studsBox.BackgroundColor3 = Color3.fromRGB(38,38,38)
+studsBox.TextColor3 = Color3.new(1,1,1)
+
+-- On / Off
+onBtn.Parent = frame
+onBtn.Size = UDim2.new(0,200,0,30)
+onBtn.Position = UDim2.new(0.05,0,0.42,0)
+onBtn.Text = "Turn ON (Q)"
+onBtn.BackgroundColor3 = Color3.fromRGB(50,170,70)
+onBtn.TextColor3 = Color3.new(1,1,1)
+onBtn.Font = Enum.Font.SourceSansBold
+onBtn.TextSize = 16
+
+offBtn.Parent = frame
+offBtn.Size = UDim2.new(0,200,0,30)
+offBtn.Position = UDim2.new(0.05,0,0.58,0)
+offBtn.Text = "Turn OFF"
+offBtn.BackgroundColor3 = Color3.fromRGB(170,50,50)
+offBtn.TextColor3 = Color3.new(1,1,1)
+offBtn.Font = Enum.Font.SourceSansBold
+offBtn.TextSize = 16
+
+-- Keybind box
+keyBox.Parent = frame
+keyBox.PlaceholderText = "Set Keybind (e.g. Q)"
+keyBox.Size = UDim2.new(0,200,0,28)
+keyBox.Position = UDim2.new(0.05,0,0.84,0)
+keyBox.BackgroundColor3 = Color3.fromRGB(38,38,38)
+keyBox.TextColor3 = Color3.new(1,1,1)
+
+-- Slider UI
+sliderFrame.Parent = frame
+sliderFrame.Size = UDim2.new(0,200,0,12)
+sliderFrame.Position = UDim2.new(0.05,0,0.04,0)
+sliderFrame.BackgroundColor3 = Color3.fromRGB(50,50,50)
+
+sliderBar.Parent = sliderFrame
+sliderBar.Size = UDim2.new(0,0,1,0)
+sliderBar.BackgroundColor3 = Color3.fromRGB(100,200,100)
+
+sliderHandle.Parent = sliderFrame
+sliderHandle.Size = UDim2.new(0,10,2,0)
+sliderHandle.Position = UDim2.new(0,0,-0.5,0)
+sliderHandle.BackgroundColor3 = Color3.new(1,1,1)
+
+sliderLabel.Parent = frame
+sliderLabel.Size = UDim2.new(0,200,0,18)
+sliderLabel.Position = UDim2.new(0.05,0,0.06,14)
+sliderLabel.BackgroundTransparency = 1
+sliderLabel.TextColor3 = Color3.new(1,1,1)
+sliderLabel.Text = "Studs: "..tostring(SliderStuds)
+sliderLabel.Font = Enum.Font.SourceSans
+sliderLabel.TextSize = 14
+sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+hint.Parent = frame
+hint.Size = UDim2.new(0,200,0,14)
+hint.Position = UDim2.new(0.05,0,1,-18)
+hint.BackgroundTransparency = 1
+hint.Text = "Use Z/X to adjust studs. Time fixed = 9e9"
+hint.TextColor3 = Color3.fromRGB(180,180,180)
+hint.Font = Enum.Font.SourceSans
+hint.TextSize = 12
+
+-- Utility to update slider visuals
+local function updateSliderUI()
+    local totalX = math.max(sliderFrame.AbsoluteSize.X, 1)
+    local percent = (SliderStuds - 1) / 49
+    local relativeX = percent * totalX
+    sliderHandle.Position = UDim2.new(0, relativeX, -0.5, 0)
+    sliderBar.Size = UDim2.new(0, relativeX, 1, 0)
+    sliderLabel.Text = "Studs: "..tostring(SliderStuds)
+end
+sliderFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateSliderUI)
+
+-- Slider dragging
+local dragging = false
+sliderHandle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local relX = math.clamp(input.Position.X - sliderFrame.AbsolutePosition.X, 0, sliderFrame.AbsoluteSize.X)
+        local pct = relX / math.max(sliderFrame.AbsoluteSize.X, 1)
+        SliderStuds = math.floor(1 + pct * 49)
+        updateSliderUI()
+    end
+end)
+
+-- Studs manual entry handling
+studsBox.FocusLost:Connect(function(enter)
+    if enter and studsBox.Text ~= "" then
+        local v = tonumber(studsBox.Text)
+        if v then
+            SliderStuds = math.clamp(math.floor(v), 1, 50)
+            updateSliderUI()
+            studsBox.Text = "Set: "..tostring(SliderStuds)
         else
-            local PredictionTime = 0.2
-            PredictedPos = TargetPos + TargetVel * PredictionTime
+            studsBox.Text = "Invalid"
         end
-
-        local Direction = PredictedPos - HumanoidRootPart.Position
-        local Distance = Direction.Magnitude
-
-        -- Speed capped at 100
-        local Speed = math.clamp(Distance * 2, 0, 100)
-
-        local OldVel = HumanoidRootPart.Velocity
-
-        -- Pass through walls
-        HumanoidRootPart.CanCollide = false
-        HumanoidRootPart.Velocity = Direction.Unit * Speed
-
-        -- Face target only during attack
-        local Playing = false
-        for _, v in Humanoid:GetPlayingAnimationTracks() do
-            if table.find(AttackAnimations, v.Animation.AnimationId) and (v.TimePosition/v.Length < 0.75) then
-                Playing = true
-                break
-            end
-        end
-        if Playing then
-            HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position, PredictedPos)
-        end
-
-        game:GetService("RunService").RenderStepped:Wait()
-        HumanoidRootPart.Velocity = OldVel
-        HumanoidRootPart.CanCollide = true
-        task.wait(0.05)
-    end
-end
-
--- Main loop
-game:GetService("RunService").Heartbeat:Connect(function()
-    if not ForsakenReachEnabled or not HumanoidRootPart then return end
-    local Target = getFacingTarget()
-    if Target then
-        adjustToTarget(Target)
     end
 end)
+
+-- Exit / Minimize
+exitBtn.MouseButton1Click:Connect(function()
+    frame.Visible = false
+    miniTab.Visible = true
+end)
+miniTab.MouseButton1Click:Connect(function()
+    frame.Visible = true
+    miniTab.Visible = false
+end)
+
+-- Keybind set
+keyBox.FocusLost:Connect(function(enter)
+    if enter and keyBox.Text ~= "" then
+        local k = tostring(keyBox.Text):upper()
+        if Enum.KeyCode[k] then
+            CurrentKeybind = Enum.KeyCode[k]
+            onBtn.Text = "Turn ON ("..k..")"
+            keyBox.Text = "Set to: "..k
+        else
+            keyBox.Text = "Invalid Key"
+        end
+    end
+end)
+
+-- Keyboard input
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == CurrentKeybind then
+        if getgenv().emergency_stop then
+            lolz:StopExtendingHitbox()
+        else
+            local manual = tonumber(studsBox.Text)
+            if manual then SliderStuds = math.clamp(math.floor(manual), 1, 50) end
+            updateSliderUI()
+            task.spawn(function() lolz:ExtendHitbox(SliderStuds, 9e9) end)
+        end
+    elseif input.KeyCode == Enum.KeyCode.Z then
+        SliderStuds = math.clamp(SliderStuds + 1, 1, 50)
+        updateSliderUI()
+    elseif input.KeyCode == Enum.KeyCode.X then
+        SliderStuds = math.clamp(SliderStuds - 1, 1, 50)
+        updateSliderUI()
+    end
+end)
+
+-- Buttons
+onBtn.MouseButton1Click:Connect(function()
+    local manual = tonumber(studsBox.Text)
+    if manual then SliderStuds = math.clamp(math.floor(manual), 1, 50) end
+    updateSliderUI()
+    task.spawn(function() lolz:ExtendHitbox(SliderStuds, 9e9) end)
+end)
+offBtn.MouseButton1Click:Connect(function()
+    lolz:StopExtendingHitbox()
+end)
+
+-- Drag frame
+local draggingFrame, dragInput, dragStart, startPos
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingFrame = true
+        dragInput = input
+        dragStart = input.Position
+        startPos = frame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                draggingFrame = false
+            end
+        end)
+    end
+end)
+frame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if draggingFrame and input == dragInput then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+updateSliderUI()
+
+-- Find closest target
+local function findClosestTarget(hrp)
+    local closestTarget = nil
+    local closestDist = math.huge
+
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj:FindFirstChild("HumanoidRootPart") then
+            local hum = obj.Humanoid
+            local npcHRP = obj.HumanoidRootPart
+            if hum.Health > 0 and obj ~= lp.Character then
+                local d = (hrp.Position - npcHRP.Position).Magnitude
+                if d < closestDist then
+                    closestDist = d
+                    closestTarget = npcHRP
+                end
+            end
+        end
+    end
+
+    for _, pl in pairs(Players:GetPlayers()) do
+        if pl ~= lp and pl.Character and pl.Character:FindFirstChild("HumanoidRootPart") and pl.Character:FindFirstChild("Humanoid") then
+            local phrp = pl.Character.HumanoidRootPart
+            local phum = pl.Character.Humanoid
+            if phum.Health > 0 then
+                local d = (hrp.Position - phrp.Position).Magnitude
+                if d < closestDist then
+                    closestDist = d
+                    closestTarget = phrp
+                end
+            end
+        end
+    end
+
+    return closestTarget, closestDist
+end
+
+-- Circle Visualizer
+local circle = Instance.new("Part")
+circle.Anchored = true
+circle.CanCollide = false
+circle.Transparency = 0.5
+circle.Shape = Enum.PartType.Ball
+circle.Size = Vector3.new(1,1,1)
+circle.Material = Enum.Material.Neon
+circle.Color = Color3.fromRGB(255,0,0)
+circle.Parent = workspace
+
+-- ExtendHitbox
+function lolz:ExtendHitbox(studs, duration)
+    local distancePower = StudsIntoPower(studs or SliderStuds)
+    local startTime = tick()
+    getgenv().emergency_stop = false
+
+    while tick() - startTime < (duration or 9e9) and not getgenv().emergency_stop do
+        RunService.Heartbeat:Wait()
+
+        local char = lp and lp.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then continue end
+
+        local target, dist = findClosestTarget(hrp)
+        if target then
+            local fromPos = hrp.Position
+            local toPos = Vector3.new(target.Position.X, fromPos.Y, target.Position.Z)
+            pcall(function() hrp.CFrame = CFrame.new(fromPos, toPos) end)
+        end
+
+        -- Circle visualizer
+        circle.Position = hrp.Position
+        circle.Size = Vector3.new(SliderStuds*2,0.5,SliderStuds*2)
+
+        distancePower = StudsIntoPower(SliderStuds)
+        local originalVel = hrp.Velocity
+        hrp.Velocity = originalVel * distancePower + (hrp.CFrame.LookVector * distancePower)
+        RunService.RenderStepped:Wait()
+        hrp.Velocity = originalVel
+    end
+
+    getgenv().emergency_stop = false
+end
+
+function lolz:StopExtendingHitbox()
+    getgenv().emergency_stop = true
+end
+
+return lolz
