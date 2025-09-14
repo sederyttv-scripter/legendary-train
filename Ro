@@ -1,4 +1,4 @@
--- Hitbox Extender (Clean GUI, Circle Visualizer)
+-- Hitbox Extender (Optimized + Smooth Targeting)
 local lolz = {}
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -8,16 +8,24 @@ local lp = Players.LocalPlayer
 -- Global stop flag
 getgenv().emergency_stop = getgenv().emergency_stop or false
 
--- Settings
+-- Settings (tweak these)
 local CurrentKeybind = Enum.KeyCode.Q
 local SliderStuds = 2
+
+-- Performance / behavior settings
+local SCAN_DELAY = 0.30          -- seconds between expensive scans (0.2-0.5 recommended)
+local TARGET_RETENTION = 6       -- seconds to keep a target if still valid
+local SMOOTHING = 0.25           -- lerp alpha for rotation (0 = instant snap, 1 = no change)
+local MAX_RETENTION_DISTANCE = 200 -- if target is farther than this, re-scan
+local APPLY_VELOCITY = false     -- set true only if you really want that behavior (may be laggy)
+local VELOCITY_SCALE = 6         -- only used if APPLY_VELOCITY true
 
 -- Utility: studs -> power multiplier
 local function StudsIntoPower(studs)
     return studs * 6
 end
 
--- GUI creation
+-- GUI creation (kept from your original, lightly formatted)
 local gui = Instance.new("ScreenGui")
 local frame = Instance.new("Frame")
 local uicorner = Instance.new("UICorner")
@@ -36,7 +44,6 @@ local hint = Instance.new("TextLabel")
 
 pcall(function() gui.Parent = game:GetService("CoreGui") end)
 
--- Frame
 frame.Parent = gui
 frame.BackgroundColor3 = Color3.fromRGB(28,28,28)
 frame.Position = UDim2.new(0.05,0,0.35,0)
@@ -44,7 +51,6 @@ frame.Size = UDim2.new(0,240,0,260)
 uicorner.CornerRadius = UDim.new(0,10)
 uicorner.Parent = frame
 
--- Title
 title.Parent = frame
 title.Size = UDim2.new(1,0,0,28)
 title.BackgroundTransparency = 1
@@ -54,7 +60,6 @@ title.TextColor3 = Color3.new(1,1,1)
 title.Font = Enum.Font.SourceSansBold
 title.TextSize = 18
 
--- Exit button
 exitBtn.Parent = frame
 exitBtn.Size = UDim2.new(0,26,0,26)
 exitBtn.Position = UDim2.new(1,-30,0,2)
@@ -64,7 +69,6 @@ exitBtn.TextSize = 16
 exitBtn.BackgroundColor3 = Color3.fromRGB(180,50,50)
 exitBtn.TextColor3 = Color3.new(1,1,1)
 
--- Minimized tab
 miniTab.Parent = gui
 miniTab.Size = UDim2.new(0,96,0,34)
 miniTab.Position = UDim2.new(1,-110,1,-46)
@@ -73,7 +77,6 @@ miniTab.Text = "Hitbox GUI"
 miniTab.TextColor3 = Color3.new(1,1,1)
 miniTab.Visible = false
 
--- Studs textbox
 studsBox.Parent = frame
 studsBox.PlaceholderText = "Manual studs (optional)"
 studsBox.Size = UDim2.new(0,200,0,30)
@@ -81,7 +84,6 @@ studsBox.Position = UDim2.new(0.05,0,0.18,0)
 studsBox.BackgroundColor3 = Color3.fromRGB(38,38,38)
 studsBox.TextColor3 = Color3.new(1,1,1)
 
--- On / Off
 onBtn.Parent = frame
 onBtn.Size = UDim2.new(0,200,0,30)
 onBtn.Position = UDim2.new(0.05,0,0.42,0)
@@ -100,7 +102,6 @@ offBtn.TextColor3 = Color3.new(1,1,1)
 offBtn.Font = Enum.Font.SourceSansBold
 offBtn.TextSize = 16
 
--- Keybind box
 keyBox.Parent = frame
 keyBox.PlaceholderText = "Set Keybind (e.g. Q)"
 keyBox.Size = UDim2.new(0,200,0,28)
@@ -108,7 +109,6 @@ keyBox.Position = UDim2.new(0.05,0,0.84,0)
 keyBox.BackgroundColor3 = Color3.fromRGB(38,38,38)
 keyBox.TextColor3 = Color3.new(1,1,1)
 
--- Slider UI
 sliderFrame.Parent = frame
 sliderFrame.Size = UDim2.new(0,200,0,12)
 sliderFrame.Position = UDim2.new(0.05,0,0.04,0)
@@ -142,7 +142,7 @@ hint.TextColor3 = Color3.fromRGB(180,180,180)
 hint.Font = Enum.Font.SourceSans
 hint.TextSize = 12
 
--- Utility to update slider visuals
+-- UI helpers
 local function updateSliderUI()
     local totalX = math.max(sliderFrame.AbsoluteSize.X, 1)
     local percent = (SliderStuds - 1) / 49
@@ -174,7 +174,7 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- Studs manual entry handling
+-- Studs manual entry
 studsBox.FocusLost:Connect(function(enter)
     if enter and studsBox.Text ~= "" then
         local v = tonumber(studsBox.Text)
@@ -273,16 +273,47 @@ end)
 
 updateSliderUI()
 
--- Find closest target
+-- Helper: try to auto-detect an NPC root folder to avoid expensive GetDescendants scans
+local function findNpcRoot()
+    -- try a few common places
+    local candidates = {
+        workspace:FindFirstChild("#GAME"),
+        workspace:FindFirstChild("NPCFolder"),
+        workspace:FindFirstChild("NPCs"),
+        workspace:FindFirstChild("Monsters"),
+        workspace:FindFirstChild("Enemies"),
+        workspace
+    }
+    for _, cand in ipairs(candidates) do
+        if cand and cand:IsA("Instance") then
+            -- If #GAME, try deeper structure
+            if cand.Name == "#GAME" then
+                local ok
+                pcall(function()
+                    ok = cand:FindFirstChild("Folders") and cand.Folders:FindFirstChild("HumanoidFolder") and cand.Folders.HumanoidFolder:FindFirstChild("NPCFolder")
+                end)
+                if ok then return ok end
+            else
+                return cand
+            end
+        end
+    end
+    return workspace
+end
+
+local NPC_ROOT = findNpcRoot()
+
+-- Efficient target finding (scans only NPC_ROOT children and players)
 local function findClosestTarget(hrp)
     local closestTarget = nil
     local closestDist = math.huge
 
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and obj:FindFirstChild("HumanoidRootPart") then
-            local hum = obj.Humanoid
-            local npcHRP = obj.HumanoidRootPart
-            if hum.Health > 0 and obj ~= lp.Character then
+    -- scan NPC_ROOT children (shallow)
+    for _, obj in pairs(NPC_ROOT:GetChildren()) do
+        if obj:IsA("Model") then
+            local npcHRP = obj:FindFirstChild("HumanoidRootPart")
+            local hum = obj:FindFirstChild("Humanoid")
+            if npcHRP and hum and hum.Health > 0 and obj ~= lp.Character then
                 local d = (hrp.Position - npcHRP.Position).Magnitude
                 if d < closestDist then
                     closestDist = d
@@ -292,11 +323,12 @@ local function findClosestTarget(hrp)
         end
     end
 
+    -- scan players
     for _, pl in pairs(Players:GetPlayers()) do
-        if pl ~= lp and pl.Character and pl.Character:FindFirstChild("HumanoidRootPart") and pl.Character:FindFirstChild("Humanoid") then
-            local phrp = pl.Character.HumanoidRootPart
-            local phum = pl.Character.Humanoid
-            if phum.Health > 0 then
+        if pl ~= lp and pl.Character then
+            local phrp = pl.Character:FindFirstChild("HumanoidRootPart")
+            local phum = pl.Character:FindFirstChild("Humanoid")
+            if phrp and phum and phum.Health > 0 then
                 local d = (hrp.Position - phrp.Position).Magnitude
                 if d < closestDist then
                     closestDist = d
@@ -309,7 +341,7 @@ local function findClosestTarget(hrp)
     return closestTarget, closestDist
 end
 
--- Circle Visualizer
+-- Circle Visualizer (shared part)
 local circle = Instance.new("Part")
 circle.Anchored = true
 circle.CanCollide = false
@@ -320,35 +352,92 @@ circle.Material = Enum.Material.Neon
 circle.Color = Color3.fromRGB(255,0,0)
 circle.Parent = workspace
 
--- ExtendHitbox
+-- ExtendHitbox (optimized)
 function lolz:ExtendHitbox(studs, duration)
     local distancePower = StudsIntoPower(studs or SliderStuds)
     local startTime = tick()
     getgenv().emergency_stop = false
+
+    local lastScan = 0
+    local currentTarget = nil
+    local targetAcquiredAt = 0
 
     while tick() - startTime < (duration or 9e9) and not getgenv().emergency_stop do
         RunService.Heartbeat:Wait()
 
         local char = lp and lp.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if not hrp then continue end
-
-        local target, dist = findClosestTarget(hrp)
-        if target then
-            local fromPos = hrp.Position
-            local toPos = Vector3.new(target.Position.X, fromPos.Y, target.Position.Z)
-            pcall(function() hrp.CFrame = CFrame.new(fromPos, toPos) end)
+        if not hrp then
+            -- player not ready, wait one frame
+            RunService.RenderStepped:Wait()
+            continue
         end
 
-        -- Circle visualizer
-        circle.Position = hrp.Position
-        circle.Size = Vector3.new(SliderStuds*2,0.5,SliderStuds*2)
-
+        -- update distancePower in case slider changed
         distancePower = StudsIntoPower(SliderStuds)
-        local originalVel = hrp.Velocity
-        hrp.Velocity = originalVel * distancePower + (hrp.CFrame.LookVector * distancePower)
-        RunService.RenderStepped:Wait()
-        hrp.Velocity = originalVel
+
+        -- if we don't have a target or target expired/invalid, re-scan
+        local needScan = false
+        if not currentTarget then
+            needScan = true
+        else
+            -- try to ensure currentTarget still exists and is alive and not too far
+            local ok = pcall(function()
+                if not currentTarget.Parent then
+                    ok = false
+                end
+            end)
+            local valid = currentTarget and currentTarget.Parent and (currentTarget.Position and true or false)
+            if not valid then
+                needScan = true
+            else
+                local d = (hrp.Position - currentTarget.Position).Magnitude
+                if d > MAX_RETENTION_DISTANCE then
+                    needScan = true
+                end
+                -- drop if target humanoid died (best-effort safe check)
+                local hum = currentTarget.Parent and currentTarget.Parent:FindFirstChild("Humanoid")
+                if hum and hum.Health <= 0 then
+                    needScan = true
+                end
+                -- also drop if retention time passed
+                if tick() - targetAcquiredAt > TARGET_RETENTION then
+                    needScan = true
+                end
+            end
+        end
+
+        if needScan and tick() - lastScan > SCAN_DELAY then
+            local found, dist = findClosestTarget(hrp)
+            currentTarget = found
+            targetAcquiredAt = tick()
+            lastScan = tick()
+        end
+
+        -- rotate smoothly toward target (if exists)
+        if currentTarget and currentTarget.Parent then
+            local fromPos = hrp.Position
+            local toPos = Vector3.new(currentTarget.Position.X, fromPos.Y, currentTarget.Position.Z)
+            local desired = CFrame.new(fromPos, toPos)
+            -- smooth lerp to avoid snapping
+            pcall(function()
+                hrp.CFrame = hrp.CFrame:Lerp(desired, SMOOTHING)
+            end)
+        end
+
+        -- update circle visualizer
+        circle.Position = hrp.Position
+        circle.Size = Vector3.new(SliderStuds*2, 0.5, SliderStuds*2)
+
+        -- optional velocity application (disabled by default as it causes extra physics overhead)
+        if APPLY_VELOCITY then
+            local originalVel = hrp.Velocity
+            hrp.Velocity = originalVel * VELOCITY_SCALE + (hrp.CFrame.LookVector * distancePower)
+            RunService.RenderStepped:Wait()
+            hrp.Velocity = originalVel
+        else
+            RunService.RenderStepped:Wait()
+        end
     end
 
     getgenv().emergency_stop = false
