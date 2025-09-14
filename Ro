@@ -1,450 +1,259 @@
--- Hitbox Extender (Optimized + Smooth Targeting)
-local lolz = {}
-local RunService = game:GetService("RunService")
+--// Services
 local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local lp = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
 
--- Global stop flag
-getgenv().emergency_stop = getgenv().emergency_stop or false
+--// Vars
+local me = Players.LocalPlayer
+local HitboxMode = false
+local loopRunning = false
+local lastTrue = 0
+local cooldown = 0.5 -- seconds
 
--- Settings (tweak these)
-local CurrentKeybind = Enum.KeyCode.Q
-local SliderStuds = 2
+--// Animation Checker
+local function isAnimationPlaying(ids)
+	local now = tick()
+	local hum = me.Character and me.Character:FindFirstChildOfClass("Humanoid")
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+	if not animator then return false end
 
--- Performance / behavior settings
-local SCAN_DELAY = 0.30          -- seconds between expensive scans (0.2-0.5 recommended)
-local TARGET_RETENTION = 6       -- seconds to keep a target if still valid
-local SMOOTHING = 0.25           -- lerp alpha for rotation (0 = instant snap, 1 = no change)
-local MAX_RETENTION_DISTANCE = 200 -- if target is farther than this, re-scan
-local APPLY_VELOCITY = false     -- set true only if you really want that behavior (may be laggy)
-local VELOCITY_SCALE = 6         -- only used if APPLY_VELOCITY true
+	if typeof(ids) ~= "table" then ids = { ids } end
 
--- Utility: studs -> power multiplier
-local function StudsIntoPower(studs)
-    return studs * 6
+	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+		local animId = track.Animation.AnimationId:match("%d+")
+		for _, id in ipairs(ids) do
+			if animId == tostring(id) then
+				local elapsed = now - lastTrue
+				if elapsed == 0 or elapsed > cooldown then
+					lastTrue = now
+					return true
+				elseif elapsed <= 1 then
+					return true
+				else
+					return false
+				end
+			end
+		end
+	end
+	return false
 end
 
--- GUI creation (kept from your original, lightly formatted)
+--// UI Setup (reworked style)
 local gui = Instance.new("ScreenGui")
+gui.Name = "RoyHitboxUI"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = CoreGui
+
 local frame = Instance.new("Frame")
-local uicorner = Instance.new("UICorner")
-local title = Instance.new("TextLabel")
-local exitBtn = Instance.new("TextButton")
-local miniTab = Instance.new("TextButton")
-local studsBox = Instance.new("TextBox")
-local onBtn = Instance.new("TextButton")
-local offBtn = Instance.new("TextButton")
-local keyBox = Instance.new("TextBox")
-local sliderFrame = Instance.new("Frame")
-local sliderBar = Instance.new("Frame")
-local sliderHandle = Instance.new("Frame")
-local sliderLabel = Instance.new("TextLabel")
-local hint = Instance.new("TextLabel")
-
-pcall(function() gui.Parent = game:GetService("CoreGui") end)
-
+frame.Size = UDim2.new(0, 180, 0, 60)
+frame.Position = UDim2.new(0.5, -90, 0.2, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+frame.BackgroundTransparency = 0.1
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
 frame.Parent = gui
-frame.BackgroundColor3 = Color3.fromRGB(28,28,28)
-frame.Position = UDim2.new(0.05,0,0.35,0)
-frame.Size = UDim2.new(0,240,0,260)
-uicorner.CornerRadius = UDim.new(0,10)
+
+local uicorner = Instance.new("UICorner")
+uicorner.CornerRadius = UDim.new(0, 12)
 uicorner.Parent = frame
 
-title.Parent = frame
-title.Size = UDim2.new(1,0,0,28)
+local stroke = Instance.new("UIStroke")
+stroke.Thickness = 2
+stroke.Color = Color3.fromRGB(90, 150, 255)
+stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+stroke.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 20)
 title.BackgroundTransparency = 1
-title.Position = UDim2.new(0,0,0,0)
-title.Text = "Hitbox Extender"
-title.TextColor3 = Color3.new(1,1,1)
-title.Font = Enum.Font.SourceSansBold
-title.TextSize = 18
+title.Font = Enum.Font.GothamBold
+title.TextColor3 = Color3.fromRGB(200, 200, 200)
+title.TextSize = 14
+title.Text = "Hitbox Controller"
+title.Parent = frame
 
-exitBtn.Parent = frame
-exitBtn.Size = UDim2.new(0,26,0,26)
-exitBtn.Position = UDim2.new(1,-30,0,2)
-exitBtn.Text = "X"
-exitBtn.Font = Enum.Font.SourceSansBold
-exitBtn.TextSize = 16
-exitBtn.BackgroundColor3 = Color3.fromRGB(180,50,50)
-exitBtn.TextColor3 = Color3.new(1,1,1)
+local button = Instance.new("TextButton")
+button.Size = UDim2.new(1, -20, 0, 30)
+button.Position = UDim2.new(0, 10, 0, 25)
+button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+button.TextColor3 = Color3.fromRGB(255, 255, 255)
+button.Font = Enum.Font.GothamBold
+button.TextSize = 16
+button.Text = "Hitbox: OFF"
+button.Parent = frame
 
-miniTab.Parent = gui
-miniTab.Size = UDim2.new(0,96,0,34)
-miniTab.Position = UDim2.new(1,-110,1,-46)
-miniTab.BackgroundColor3 = Color3.fromRGB(40,40,40)
-miniTab.Text = "Hitbox GUI"
-miniTab.TextColor3 = Color3.new(1,1,1)
-miniTab.Visible = false
+local bcorner = Instance.new("UICorner")
+bcorner.CornerRadius = UDim.new(0, 8)
+bcorner.Parent = button
 
-studsBox.Parent = frame
-studsBox.PlaceholderText = "Manual studs (optional)"
-studsBox.Size = UDim2.new(0,200,0,30)
-studsBox.Position = UDim2.new(0.05,0,0.18,0)
-studsBox.BackgroundColor3 = Color3.fromRGB(38,38,38)
-studsBox.TextColor3 = Color3.new(1,1,1)
-
-onBtn.Parent = frame
-onBtn.Size = UDim2.new(0,200,0,30)
-onBtn.Position = UDim2.new(0.05,0,0.42,0)
-onBtn.Text = "Turn ON (Q)"
-onBtn.BackgroundColor3 = Color3.fromRGB(50,170,70)
-onBtn.TextColor3 = Color3.new(1,1,1)
-onBtn.Font = Enum.Font.SourceSansBold
-onBtn.TextSize = 16
-
-offBtn.Parent = frame
-offBtn.Size = UDim2.new(0,200,0,30)
-offBtn.Position = UDim2.new(0.05,0,0.58,0)
-offBtn.Text = "Turn OFF"
-offBtn.BackgroundColor3 = Color3.fromRGB(170,50,50)
-offBtn.TextColor3 = Color3.new(1,1,1)
-offBtn.Font = Enum.Font.SourceSansBold
-offBtn.TextSize = 16
-
-keyBox.Parent = frame
-keyBox.PlaceholderText = "Set Keybind (e.g. Q)"
-keyBox.Size = UDim2.new(0,200,0,28)
-keyBox.Position = UDim2.new(0.05,0,0.84,0)
-keyBox.BackgroundColor3 = Color3.fromRGB(38,38,38)
-keyBox.TextColor3 = Color3.new(1,1,1)
-
-sliderFrame.Parent = frame
-sliderFrame.Size = UDim2.new(0,200,0,12)
-sliderFrame.Position = UDim2.new(0.05,0,0.04,0)
-sliderFrame.BackgroundColor3 = Color3.fromRGB(50,50,50)
-
-sliderBar.Parent = sliderFrame
-sliderBar.Size = UDim2.new(0,0,1,0)
-sliderBar.BackgroundColor3 = Color3.fromRGB(100,200,100)
-
-sliderHandle.Parent = sliderFrame
-sliderHandle.Size = UDim2.new(0,10,2,0)
-sliderHandle.Position = UDim2.new(0,0,-0.5,0)
-sliderHandle.BackgroundColor3 = Color3.new(1,1,1)
-
-sliderLabel.Parent = frame
-sliderLabel.Size = UDim2.new(0,200,0,18)
-sliderLabel.Position = UDim2.new(0.05,0,0.06,14)
-sliderLabel.BackgroundTransparency = 1
-sliderLabel.TextColor3 = Color3.new(1,1,1)
-sliderLabel.Text = "Studs: "..tostring(SliderStuds)
-sliderLabel.Font = Enum.Font.SourceSans
-sliderLabel.TextSize = 14
-sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-hint.Parent = frame
-hint.Size = UDim2.new(0,200,0,14)
-hint.Position = UDim2.new(0.05,0,1,-18)
-hint.BackgroundTransparency = 1
-hint.Text = "Use Z/X to adjust studs. Time fixed = 9e9"
-hint.TextColor3 = Color3.fromRGB(180,180,180)
-hint.Font = Enum.Font.SourceSans
-hint.TextSize = 12
-
--- UI helpers
-local function updateSliderUI()
-    local totalX = math.max(sliderFrame.AbsoluteSize.X, 1)
-    local percent = (SliderStuds - 1) / 49
-    local relativeX = percent * totalX
-    sliderHandle.Position = UDim2.new(0, relativeX, -0.5, 0)
-    sliderBar.Size = UDim2.new(0, relativeX, 1, 0)
-    sliderLabel.Text = "Studs: "..tostring(SliderStuds)
-end
-sliderFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateSliderUI)
-
--- Slider dragging
-local dragging = false
-sliderHandle.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-    end
-end)
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local relX = math.clamp(input.Position.X - sliderFrame.AbsolutePosition.X, 0, sliderFrame.AbsoluteSize.X)
-        local pct = relX / math.max(sliderFrame.AbsoluteSize.X, 1)
-        SliderStuds = math.floor(1 + pct * 49)
-        updateSliderUI()
-    end
+-- cooldown display loop
+task.spawn(function()
+	while true do
+		RunService.RenderStepped:Wait()
+		if HitboxMode then
+			local now = tick()
+			local elapsed = now - lastTrue
+			if elapsed < cooldown and elapsed > 0.4 then
+				local remaining = math.max(0, cooldown - elapsed)
+				button.Text = ("Hitbox: Cooldown (%.1f)"):format(remaining)
+			else
+				button.Text = "Hitbox: ON"
+			end
+		else
+			button.Text = "Hitbox: OFF"
+		end
+	end
 end)
 
--- Studs manual entry
-studsBox.FocusLost:Connect(function(enter)
-    if enter and studsBox.Text ~= "" then
-        local v = tonumber(studsBox.Text)
-        if v then
-            SliderStuds = math.clamp(math.floor(v), 1, 50)
-            updateSliderUI()
-            studsBox.Text = "Set: "..tostring(SliderStuds)
-        else
-            studsBox.Text = "Invalid"
-        end
-    end
-end)
-
--- Exit / Minimize
-exitBtn.MouseButton1Click:Connect(function()
-    frame.Visible = false
-    miniTab.Visible = true
-end)
-miniTab.MouseButton1Click:Connect(function()
-    frame.Visible = true
-    miniTab.Visible = false
-end)
-
--- Keybind set
-keyBox.FocusLost:Connect(function(enter)
-    if enter and keyBox.Text ~= "" then
-        local k = tostring(keyBox.Text):upper()
-        if Enum.KeyCode[k] then
-            CurrentKeybind = Enum.KeyCode[k]
-            onBtn.Text = "Turn ON ("..k..")"
-            keyBox.Text = "Set to: "..k
-        else
-            keyBox.Text = "Invalid Key"
-        end
-    end
-end)
-
--- Keyboard input
-UserInputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
-    if input.KeyCode == CurrentKeybind then
-        if getgenv().emergency_stop then
-            lolz:StopExtendingHitbox()
-        else
-            local manual = tonumber(studsBox.Text)
-            if manual then SliderStuds = math.clamp(math.floor(manual), 1, 50) end
-            updateSliderUI()
-            task.spawn(function() lolz:ExtendHitbox(SliderStuds, 9e9) end)
-        end
-    elseif input.KeyCode == Enum.KeyCode.Z then
-        SliderStuds = math.clamp(SliderStuds + 1, 1, 50)
-        updateSliderUI()
-    elseif input.KeyCode == Enum.KeyCode.X then
-        SliderStuds = math.clamp(SliderStuds - 1, 1, 50)
-        updateSliderUI()
-    end
-end)
-
--- Buttons
-onBtn.MouseButton1Click:Connect(function()
-    local manual = tonumber(studsBox.Text)
-    if manual then SliderStuds = math.clamp(math.floor(manual), 1, 50) end
-    updateSliderUI()
-    task.spawn(function() lolz:ExtendHitbox(SliderStuds, 9e9) end)
-end)
-offBtn.MouseButton1Click:Connect(function()
-    lolz:StopExtendingHitbox()
-end)
-
--- Drag frame
-local draggingFrame, dragInput, dragStart, startPos
-frame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        draggingFrame = true
-        dragInput = input
-        dragStart = input.Position
-        startPos = frame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                draggingFrame = false
-            end
-        end)
-    end
-end)
-frame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement then
-        dragInput = input
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if draggingFrame and input == dragInput then
-        local delta = input.Position - dragStart
-        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
-
-updateSliderUI()
-
--- Helper: try to auto-detect an NPC root folder to avoid expensive GetDescendants scans
-local function findNpcRoot()
-    -- try a few common places
-    local candidates = {
-        workspace:FindFirstChild("#GAME"),
-        workspace:FindFirstChild("NPCFolder"),
-        workspace:FindFirstChild("NPCs"),
-        workspace:FindFirstChild("Monsters"),
-        workspace:FindFirstChild("Enemies"),
-        workspace
-    }
-    for _, cand in ipairs(candidates) do
-        if cand and cand:IsA("Instance") then
-            -- If #GAME, try deeper structure
-            if cand.Name == "#GAME" then
-                local ok
-                pcall(function()
-                    ok = cand:FindFirstChild("Folders") and cand.Folders:FindFirstChild("HumanoidFolder") and cand.Folders.HumanoidFolder:FindFirstChild("NPCFolder")
-                end)
-                if ok then return ok end
-            else
-                return cand
-            end
-        end
-    end
-    return workspace
+--// Root fetcher
+local function getRoot(character)
+	return character and character:FindFirstChild("HumanoidRootPart")
 end
 
-local NPC_ROOT = findNpcRoot()
+--// Nearest Humanoid Finder
+local checkBoxSize = Vector3.new(100, 50, 100)
 
--- Efficient target finding (scans only NPC_ROOT children and players)
-local function findClosestTarget(hrp)
-    local closestTarget = nil
-    local closestDist = math.huge
-
-    -- scan NPC_ROOT children (shallow)
-    for _, obj in pairs(NPC_ROOT:GetChildren()) do
-        if obj:IsA("Model") then
-            local npcHRP = obj:FindFirstChild("HumanoidRootPart")
-            local hum = obj:FindFirstChild("Humanoid")
-            if npcHRP and hum and hum.Health > 0 and obj ~= lp.Character then
-                local d = (hrp.Position - npcHRP.Position).Magnitude
-                if d < closestDist then
-                    closestDist = d
-                    closestTarget = npcHRP
-                end
-            end
-        end
-    end
-
-    -- scan players
-    for _, pl in pairs(Players:GetPlayers()) do
-        if pl ~= lp and pl.Character then
-            local phrp = pl.Character:FindFirstChild("HumanoidRootPart")
-            local phum = pl.Character:FindFirstChild("Humanoid")
-            if phrp and phum and phum.Health > 0 then
-                local d = (hrp.Position - phrp.Position).Magnitude
-                if d < closestDist then
-                    closestDist = d
-                    closestTarget = phrp
-                end
-            end
-        end
-    end
-
-    return closestTarget, closestDist
+local function isDescendantOf(obj, parent)
+	return obj and parent and obj:IsDescendantOf(parent)
 end
 
--- Circle Visualizer (shared part)
-local circle = Instance.new("Part")
-circle.Anchored = true
-circle.CanCollide = false
-circle.Transparency = 0.5
-circle.Shape = Enum.PartType.Ball
-circle.Size = Vector3.new(1,1,1)
-circle.Material = Enum.Material.Neon
-circle.Color = Color3.fromRGB(255,0,0)
-circle.Parent = workspace
+local function getNearestHumanoid()
+	if not me.Character then return nil end
+	local root = getRoot(me.Character)
+	if not root then return nil end
 
--- ExtendHitbox (optimized)
-function lolz:ExtendHitbox(studs, duration)
-    local distancePower = StudsIntoPower(studs or SliderStuds)
-    local startTime = tick()
-    getgenv().emergency_stop = false
+	local char = me.Character
+	local isSurvivor = isDescendantOf(char, Workspace.Players:FindFirstChild("Survivors"))
+	local isKiller = isDescendantOf(char, Workspace.Players:FindFirstChild("Killers"))
 
-    local lastScan = 0
-    local currentTarget = nil
-    local targetAcquiredAt = 0
+	local targetGroup = nil
+	if isSurvivor then
+		targetGroup = Workspace.Players:FindFirstChild("Killers")
+	elseif isKiller then
+		targetGroup = Workspace.Players:FindFirstChild("Survivors")
+	end
 
-    while tick() - startTime < (duration or 9e9) and not getgenv().emergency_stop do
-        RunService.Heartbeat:Wait()
+	local parts = Workspace:GetPartBoundsInBox(root.CFrame, checkBoxSize)
+	local nearest, dist = nil, math.huge
 
-        local char = lp and lp.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if not hrp then
-            -- player not ready, wait one frame
-            RunService.RenderStepped:Wait()
-            continue
-        end
+	for _, part in pairs(parts) do
+		local c = part:FindFirstAncestorOfClass("Model")
+		if c and c:FindFirstChild("Humanoid") and c:FindFirstChild("HumanoidRootPart") then
+			if c ~= me.Character and c.Humanoid.Health > 0 then
+				_G.IsNpc = false
+				local valid = false
+				if targetGroup then
+					valid = isDescendantOf(c, targetGroup)
+				else
+					valid = true
+				end
+				if valid then
+					local hrp = c.HumanoidRootPart
+					local d = (hrp.Position - root.Position).Magnitude
+					if d < dist then
+						dist = d
+						nearest = hrp
+					end
+				end
+			end
+		end
+	end
 
-        -- update distancePower in case slider changed
-        distancePower = StudsIntoPower(SliderStuds)
+	if not nearest then
+		for _, part in pairs(parts) do
+			local c = part:FindFirstAncestorOfClass("Model")
+			if c and c:FindFirstChild("Humanoid") and c:FindFirstChild("HumanoidRootPart") then
+				if c ~= me.Character and c.Humanoid.Health > 0 then
+					_G.IsNpc = true
+					local hrp = c.HumanoidRootPart
+					local d = (hrp.Position - root.Position).Magnitude
+					if d < dist then
+						dist = d
+						nearest = hrp
+					end
+				end
+			end
+		end
+	end
 
-        -- if we don't have a target or target expired/invalid, re-scan
-        local needScan = false
-        if not currentTarget then
-            needScan = true
-        else
-            -- try to ensure currentTarget still exists and is alive and not too far
-            local ok = pcall(function()
-                if not currentTarget.Parent then
-                    ok = false
-                end
-            end)
-            local valid = currentTarget and currentTarget.Parent and (currentTarget.Position and true or false)
-            if not valid then
-                needScan = true
-            else
-                local d = (hrp.Position - currentTarget.Position).Magnitude
-                if d > MAX_RETENTION_DISTANCE then
-                    needScan = true
-                end
-                -- drop if target humanoid died (best-effort safe check)
-                local hum = currentTarget.Parent and currentTarget.Parent:FindFirstChild("Humanoid")
-                if hum and hum.Health <= 0 then
-                    needScan = true
-                end
-                -- also drop if retention time passed
-                if tick() - targetAcquiredAt > TARGET_RETENTION then
-                    needScan = true
-                end
-            end
-        end
-
-        if needScan and tick() - lastScan > SCAN_DELAY then
-            local found, dist = findClosestTarget(hrp)
-            currentTarget = found
-            targetAcquiredAt = tick()
-            lastScan = tick()
-        end
-
-        -- rotate smoothly toward target (if exists)
-        if currentTarget and currentTarget.Parent then
-            local fromPos = hrp.Position
-            local toPos = Vector3.new(currentTarget.Position.X, fromPos.Y, currentTarget.Position.Z)
-            local desired = CFrame.new(fromPos, toPos)
-            -- smooth lerp to avoid snapping
-            pcall(function()
-                hrp.CFrame = hrp.CFrame:Lerp(desired, SMOOTHING)
-            end)
-        end
-
-        -- update circle visualizer
-        circle.Position = hrp.Position
-        circle.Size = Vector3.new(SliderStuds*2, 0.5, SliderStuds*2)
-
-        -- optional velocity application (disabled by default as it causes extra physics overhead)
-        if APPLY_VELOCITY then
-            local originalVel = hrp.Velocity
-            hrp.Velocity = originalVel * VELOCITY_SCALE + (hrp.CFrame.LookVector * distancePower)
-            RunService.RenderStepped:Wait()
-            hrp.Velocity = originalVel
-        else
-            RunService.RenderStepped:Wait()
-        end
-    end
-
-    getgenv().emergency_stop = false
+	return nearest
 end
 
-function lolz:StopExtendingHitbox()
-    getgenv().emergency_stop = true
+--// Hitbox Loop
+local function startHitboxMode()
+	if loopRunning then return end
+	loopRunning = true
+
+	task.spawn(function()
+		while HitboxMode do
+			RunService.Heartbeat:Wait()
+			local character = me.Character
+			local root = getRoot(character)
+			local vel, movel = nil, 0.1
+
+			while not (character and character.Parent and root and root.Parent) do
+				RunService.Heartbeat:Wait()
+				character = me.Character
+				root = getRoot(character)
+			end
+
+			vel = root.Velocity
+			local ids = {
+				126830014841198, 126355327951215, 121086746534252, 18885909645,
+				106776364623742, 105458270463374, 106538427162796, 126896426760253,
+				83829782357897, 116618003477002, 86545133269813, 106014898528300,
+				87259391926321, 133491532453922, 98031287364865, 119462383658044,
+				77448521277146, 103741352379819, 131696603025265, 122503338277352,
+				97648548303678, 94162446513587, 84426150435898, 93069721274110,
+				114620047310688, 97433060861952, 82183356141401, 100592913030351,
+				121293883585738, 70447634862911, 92173139187970, 106847695270773,
+				125403313786645, 81639435858902, 137314737492715, 120112897026015,
+				82113744478546, 118298475669935, 126681776859538, 129976080405072,
+				109667959938617, 74707328554358, 133336594357903, 86204001129974,
+				124243639579224, 70371667919898, 131543461321709, 136323728355613
+			}
+
+			if isAnimationPlaying(ids) then
+				local target = getNearestHumanoid()
+				if target then
+					local futurePos
+					if not _G.IsNpc then
+						local predictionTime = 1.2
+						futurePos = target.Position + target.Velocity * predictionTime
+					else
+						futurePos = target.Position
+					end
+					local offset = futurePos - root.Position
+					local distance = offset.Magnitude
+					local direction = offset.Unit
+					local speed = distance * 6
+					root.Velocity = vel + Vector3.new(direction.X * speed, direction.Y * speed, direction.Z * speed)
+				end
+			end
+
+			RunService.RenderStepped:Wait()
+			if character and root then
+				root.Velocity = vel
+			end
+
+			RunService.Stepped:Wait()
+			if character and root then
+				root.Velocity = vel + Vector3.new(0, movel, 0)
+				movel = -movel
+			end
+		end
+		loopRunning = false
+	end)
 end
 
-return lolz
+--// Toggle button
+button.MouseButton1Click:Connect(function()
+	HitboxMode = not HitboxMode
+	if HitboxMode then
+		startHitboxMode()
+	end
+end)
